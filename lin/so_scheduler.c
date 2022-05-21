@@ -6,7 +6,6 @@
 #include "so_scheduler.h"
 #include "utils.h"
 
-#define Q_CAP 500
 #define MAX_NUM_THREADS 500
 
 // TODO add descr
@@ -46,13 +45,14 @@ typedef struct
 typedef struct
 {
     unsigned int size;
-    so_thread *tasks[Q_CAP];
+    so_thread *tasks[MAX_NUM_THREADS];
 } task_queue;
 
 // TODO add descr
 // Scheduler struct
 typedef struct
 {
+    bool init;
     unsigned int events;
     unsigned int quantum;
     so_thread *running_th;
@@ -60,38 +60,35 @@ typedef struct
     unsigned int num_threads;
     so_thread *threads[MAX_NUM_THREADS];
 
-    task_queue *tq;
+    task_queue tq;
 
     // Semaphore for ending the scheduler thread-safely
     sem_t end_sem;
 } so_scheduler;
 
+
 // TODO add descr
-task_queue *create_task_queue(void);
+so_thread *peek();
 // TODO add descr
-so_thread *peek(task_queue *tq);
+void pop();
 // TODO add descr
-void pop(task_queue *tq);
+void shift_queue_right(unsigned int pivot);
 // TODO add descr
-void shift_queue_right(task_queue *tq, unsigned int pivot);
+unsigned int get_insert_pos(unsigned int trg_priority);
 // TODO add descr
-unsigned int get_insert_pos(task_queue *tq, unsigned int trg_priority);
-// TODO add descr
-void enqueue(task_queue *tq, so_thread *t);
-// TODO add descr
-void destroy_scheduler(so_scheduler *s);
+void enqueue(so_thread *t);
 /**
  * @brief Scheduler update routine. Schedules next thread or sets the current running
  *
  * @param s scheduler to update
  */
-void update_scheduler(so_scheduler *s);
+void update_scheduler();
 // TODO add descr
-void init_thread(so_scheduler *s, so_thread *t, void *thread_routine, so_handler *func, unsigned int priority);
+void init_thread(so_thread *t, void *thread_routine, so_handler *func, unsigned int priority);
 // TODO add descr
 void destroy_thread(so_thread *t);
 // TODO add descr
-void start_thread(so_thread *t, so_scheduler *s, task_queue *tq);
+void start_thread(so_thread *t);
 /**
  * @brief Routine to execute by every thread
  *
@@ -100,26 +97,15 @@ void start_thread(so_thread *t, so_scheduler *s, task_queue *tq);
  */
 void *thread_routine(void *args);
 
-static so_scheduler *s;
+so_scheduler s;
 
-// TODO add descr
-task_queue *create_task_queue(void)
+so_thread *peek()
 {
     task_queue *tq;
-
-    // Alloc memory
-    tq = calloc(1, sizeof(task_queue));
-    DIE(tq == NULL, "calloc create tq");
-
-    // Init fields
-    tq->size = 0;
-
-    return tq;
-}
-
-so_thread *peek(task_queue *tq)
-{
     unsigned int top_elem_ind;
+
+    // Get task queue
+    tq = &(s.tq);
 
     // Get top elem ind
     top_elem_ind = tq->size - 1;
@@ -127,12 +113,16 @@ so_thread *peek(task_queue *tq)
     return tq->tasks[top_elem_ind];
 }
 
-void pop(task_queue *tq)
+void pop()
 {
+    task_queue *tq;
     unsigned int top_elem_ind;
 
+    // Get task queue
+    tq = &(s.tq);
     // Get top elem ind
     top_elem_ind = tq->size - 1;
+
     // Pop top elem (mark as NULL)
     tq->tasks[top_elem_ind] = NULL;
 
@@ -140,9 +130,13 @@ void pop(task_queue *tq)
     tq->size--;
 }
 
-void shift_queue_right(task_queue *tq, unsigned int pivot)
+void shift_queue_right(unsigned int pivot)
 {
+    task_queue *tq;
     unsigned int i;
+
+    // Get task queue
+    tq = &(s.tq);
 
     // Shift elements one by one
     for (i = tq->size; i > pivot; i--)
@@ -151,8 +145,10 @@ void shift_queue_right(task_queue *tq, unsigned int pivot)
     }
 }
 
-unsigned int get_insert_pos(task_queue *tq, unsigned int trg_priority)
+unsigned int get_insert_pos(unsigned int trg_priority)
 {
+    task_queue *tq;
+
     unsigned int left;
     unsigned int mid;
     unsigned int right;
@@ -160,6 +156,9 @@ unsigned int get_insert_pos(task_queue *tq, unsigned int trg_priority)
 
     so_thread *curr_th;
     unsigned int curr_priorty;
+
+    // Get task queue
+    tq = &(s.tq);
 
     // Init boundaries
     left = 0;
@@ -189,14 +188,18 @@ unsigned int get_insert_pos(task_queue *tq, unsigned int trg_priority)
     return res;
 }
 
-void enqueue(task_queue *tq, so_thread *t)
+void enqueue(so_thread *t)
 {
+    task_queue *tq;
     unsigned int insert_pos;
 
+    // Get task queue
+    tq = &(s.tq);
+
     // Get pos to insert new task
-    insert_pos = get_insert_pos(tq, t->priority);
+    insert_pos = get_insert_pos(t->priority);
     // Make space for the new task
-    shift_queue_right(tq, insert_pos);
+    shift_queue_right(insert_pos);
 
     // Insert new task
     tq->tasks[insert_pos] = t;
@@ -204,42 +207,28 @@ void enqueue(task_queue *tq, so_thread *t)
     tq->size++;
 }
 
-void destroy_scheduler(so_scheduler *s)
-{
-    int ret;
-
-    ret = sem_destroy(&s->end_sem);
-    DIE(ret < 0, "end sem destroy");
-
-    free(s->tq);
-    free(s);
-}
-
 int so_init(unsigned int time_quantum, unsigned int io)
 {
     int ret;
 
     // Invalid call check
-    if (s || time_quantum == 0 || io > SO_MAX_NUM_EVENTS)
+    if (s.init || time_quantum == 0 || io > SO_MAX_NUM_EVENTS)
     {
         return -1;
     }
 
-    // Alloc scheduler structure
-    s = calloc(1, sizeof(so_scheduler));
-    DIE(s == NULL, "scheduler calloc");
-
     // Init fields
-    s->events = io;
-    s->quantum = time_quantum;
-    s->num_threads = 0;
-    s->running_th = NULL;
+    s.init = true;
+    s.events = io;
+    s.quantum = time_quantum;
+    s.num_threads = 0;
+    s.running_th = NULL;
 
     // Init task queue
-    s->tq = create_task_queue();
+    s.tq.size = 0;
 
     // Init end semaphore as unlocked
-    ret = sem_init(&s->end_sem, 0, 1);
+    ret = sem_init(&s.end_sem, 0, 1);
     DIE(ret < 0, "end sem init");
 
     return 0;
@@ -251,30 +240,33 @@ void so_end(void)
     unsigned int i;
 
     // Invalid call check
-    if (!s)
+    if (!s.init)
     {
         return;
     }
 
     // Lock the semaphore for thread-safe ending
-    ret = sem_wait(&s->end_sem);
+    ret = sem_wait(&s.end_sem);
     DIE(ret < 0, "end sem wait");
 
     // Wait for threads to finish
-    for (i = 0; i < s->num_threads; ++i)
+    for (i = 0; i < s.num_threads; ++i)
     {
-        ret = pthread_join(s->threads[i]->tid, NULL);
+        ret = pthread_join(s.threads[i]->tid, NULL);
         DIE(ret < 0, "thread join");
     }
 
     // Destroy threads struct
-    for (i = 0; i < s->num_threads; ++i)
+    for (i = 0; i < s.num_threads; ++i)
     {
-        destroy_thread(s->threads[i]);
+        destroy_thread(s.threads[i]);
     }
 
+    // TODO can be modularized
     // Destroy scheduler
-    destroy_scheduler(s);
+    s.init = false;
+    ret = sem_destroy(&s.end_sem);
+    DIE(ret < 0, "end sem destroy");
 }
 
 tid_t so_fork(so_handler *func, unsigned int priority)
@@ -282,7 +274,7 @@ tid_t so_fork(so_handler *func, unsigned int priority)
     task_queue *tq;
     so_thread *t;
 
-    tq = s->tq;
+    tq = &(s.tq);
 
     // Invalid call check
     if (priority > SO_MAX_PRIO || !func)
@@ -291,26 +283,26 @@ tid_t so_fork(so_handler *func, unsigned int priority)
     }
 
     // Alloc thread
-    t = calloc(1, sizeof(so_thread));
-    DIE(t == NULL, "t calloc");
+    t = malloc(sizeof(so_thread));
+    DIE(t == NULL, "t malloc");
 
     // Init new thread
-    init_thread(s, t, thread_routine, func, priority);
+    init_thread(t, thread_routine, func, priority);
 
     // Update scheduler thread list
-    s->threads[s->num_threads] = t;
+    s.threads[s.num_threads] = t;
     // Update scheduler thread count
-    s->num_threads++;
+    s.num_threads++;
     // Update thread status to ready
     t->status = READY;
     // Schedule new thread
-    enqueue(tq, t);
+    enqueue(t);
 
     // If no thread is running
-    if (!s->running_th)
+    if (!s.running_th)
     {
         // Update scheduler (look for new threads)
-        update_scheduler(s);
+        update_scheduler();
     }
     // There is a thread currently running
     else
@@ -331,13 +323,13 @@ void so_exec(void)
     unsigned int new_time_left;
 
     // Get running thread
-    t = s->running_th;
+    t = s.running_th;
     // Update time left
     new_time_left = t->time_left - 1;
     t->time_left = new_time_left;
 
     // Update scheduler with new time left
-    update_scheduler(s);
+    update_scheduler();
 
     // Wait for green light from scheduler
     ret = sem_wait(&t->run_sem);
@@ -349,13 +341,13 @@ int so_wait(unsigned int io)
     so_thread *t;
 
     // Invalid call check
-    if (io >= s->events)
+    if (io >= s.events)
     {
         return -1;
     }
 
     // Get running thread
-    t = s->running_th;
+    t = s.running_th;
     // Update thread event
     t->device = io;
     // Set thread status to blocked
@@ -376,17 +368,17 @@ int so_signal(unsigned int io)
     int resolved_th_cnt;
 
     // Invalid call check
-    if (io >= s->events)
+    if (io >= s.events)
     {
         return -1;
     }
 
-    tq = s->tq;
+    tq = &(s.tq);
     resolved_th_cnt = 0;
 
-    for (i = 0; i < s->num_threads; ++i)
+    for (i = 0; i < s.num_threads; ++i)
     {
-        curr_th = s->threads[i];
+        curr_th = s.threads[i];
 
         // If threads waits for given event and its status is blocked
         if (curr_th->device == io && curr_th->status == BLOCKED)
@@ -397,7 +389,7 @@ int so_signal(unsigned int io)
             // Set thread status to ready
             curr_th->status = READY;
             // Schedule thread
-            enqueue(tq, curr_th);
+            enqueue(curr_th);
 
             // Update resolved threads count
             resolved_th_cnt++;
@@ -411,7 +403,7 @@ int so_signal(unsigned int io)
     return resolved_th_cnt;
 }
 
-void update_scheduler(so_scheduler *s)
+void update_scheduler()
 {
     int ret;
 
@@ -428,8 +420,8 @@ void update_scheduler(so_scheduler *s)
     // True if current thread has no time left on processor
     bool has_th_time_expired;
 
-    tq = s->tq;
-    curr_th = s->running_th;
+    tq = &(s.tq);
+    curr_th = s.running_th;
 
     // No more threads in queue
     if (tq->size == 0)
@@ -438,7 +430,7 @@ void update_scheduler(so_scheduler *s)
         if (curr_th->status == TERMINATED)
         {
             // Trigger scheduler stop
-            ret = sem_post(&s->end_sem);
+            ret = sem_post(&s.end_sem);
             DIE(ret < 0, "end sem post");
         }
 
@@ -450,10 +442,10 @@ void update_scheduler(so_scheduler *s)
     }
 
     // There are still threads in queue
-    next_th = peek(tq);
+    next_th = peek();
 
     // Set scheduler state variables
-    is_no_th_running = (s->running_th == NULL);
+    is_no_th_running = (s.running_th == NULL);
     is_th_blocked_or_done = curr_th ? (curr_th->status == BLOCKED || curr_th->status == TERMINATED) : false;
     is_higher_prio_avail = curr_th ? (curr_th->priority < next_th->priority) : false;
     has_th_time_expired = curr_th ? (curr_th->time_left <= 0) : false;
@@ -466,12 +458,12 @@ void update_scheduler(so_scheduler *s)
         {
             // Schedule current thread
             curr_th->status = READY;
-            enqueue(tq, curr_th);
+            enqueue(curr_th);
         }
 
         // Set next thread running
-        s->running_th = next_th;
-        start_thread(next_th, s, tq);
+        s.running_th = next_th;
+        start_thread(next_th);
 
         // Update done
         return;
@@ -485,11 +477,11 @@ void update_scheduler(so_scheduler *s)
         {
             // Schedule current thread
             curr_th->status = READY;
-            enqueue(tq, curr_th);
+            enqueue(curr_th);
 
             // Set next thread running
-            s->running_th = next_th;
-            start_thread(next_th, s, tq);
+            s.running_th = next_th;
+            start_thread(next_th);
 
             // Update done
             return;
@@ -498,7 +490,7 @@ void update_scheduler(so_scheduler *s)
         else
         {
             //! replaceble with s->running_th->time_left = s->quantum
-            curr_th->time_left = s->quantum;
+            curr_th->time_left = s.quantum;
         }
     }
 
@@ -506,7 +498,7 @@ void update_scheduler(so_scheduler *s)
     sem_post(&curr_th->run_sem);
 }
 
-void init_thread(so_scheduler *s, so_thread *t, void *thread_routine, so_handler *func, unsigned int priority)
+void init_thread(so_thread *t, void *thread_routine, so_handler *func, unsigned int priority)
 {
     int ret;
 
@@ -514,7 +506,7 @@ void init_thread(so_scheduler *s, so_thread *t, void *thread_routine, so_handler
     t->tid = INVALID_TID;
     t->status = NEW;
     t->handler = func;
-    t->time_left = s->quantum;
+    t->time_left = s.quantum;
     t->priority = priority;
     t->device = SO_MAX_NUM_EVENTS;
 
@@ -537,16 +529,16 @@ void destroy_thread(so_thread *t)
     free(t);
 }
 
-void start_thread(so_thread *t, so_scheduler *s, task_queue *tq)
+void start_thread(so_thread *t)
 {
     int ret;
 
     // Pop task queue
-    pop(tq);
+    pop();
 
     // Set thread to running
     t->status = RUNNING;
-    t->time_left = s->quantum;
+    t->time_left = s.quantum;
 
     // Unlock running semaphore
     ret = sem_post(&t->run_sem);
@@ -569,7 +561,7 @@ void *thread_routine(void *args)
 
     // Running done -> update status & scheduler
     t->status = TERMINATED;
-    update_scheduler(s);
+    update_scheduler(&s);
 
     pthread_exit(NULL);
 }
