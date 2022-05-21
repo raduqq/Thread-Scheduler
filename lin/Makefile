@@ -1,4 +1,4 @@
-# TODO add copyright 
+# Copyright Radu-Stefan Minea 334CA [2022]
 
 CC = gcc
 CFLAGS = -fPIC -Wall -Wextra

@@ -1,4 +1,4 @@
-//! TODO add copyright TO SO
+// Source: https://ocw.cs.pub.ro/courses/so/laboratoare/resurse/die
 
 #ifndef UTILS_H
 #define UTILS_H

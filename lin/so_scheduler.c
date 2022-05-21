@@ -1,4 +1,4 @@
-// TODO add signature
+// Copyright Radu-Stefan Minea 334CA [2022]
 
 #include <stdbool.h>
 #include <semaphore.h>
@@ -67,7 +67,7 @@ typedef struct
 } so_scheduler;
 
 // TODO add descr
-task_queue *create_task_queue();
+task_queue *create_task_queue(void);
 // TODO add descr
 so_thread *peek(task_queue *tq);
 // TODO add descr
@@ -103,7 +103,7 @@ void *thread_routine(void *args);
 static so_scheduler *s;
 
 // TODO add descr
-task_queue *create_task_queue()
+task_queue *create_task_queue(void)
 {
     task_queue *tq;
 
@@ -180,8 +180,7 @@ unsigned int get_insert_pos(task_queue *tq, unsigned int trg_priority)
             // Intermediary target found
             res = mid;
             left = mid + 1;
-        }
-        else
+        } else
         {
             right = mid - 1;
         }
