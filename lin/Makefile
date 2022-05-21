@@ -1,0 +1,17 @@
+# TODO add copyright 
+
+CC = gcc
+CFLAGS = -fPIC -Wall -Wextra
+
+.PHONY: build
+build: libscheduler.so
+
+libscheduler.so: so_scheduler.o
+	$(CC) $(LDFLAGS) -shared -o $@ $^
+
+so_scheduler.o: so_scheduler.c so_scheduler.h utils.h
+	$(CC) $(CFLAGS) -o $@ -c $<
+
+.PHONY: clean
+clean:
+	-rm -f *.o libscheduler.so

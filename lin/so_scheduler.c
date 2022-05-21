@@ -1,11 +1,210 @@
-#include <stdlib.h>
+// TODO add signature
+
+#include <stdbool.h>
+#include <semaphore.h>
 
 #include "so_scheduler.h"
 #include "utils.h"
 
+#define Q_CAP 500
+#define MAX_NUM_THREADS 500
+
+// TODO add descr
+// Thread status structure
+typedef enum
+{
+    NEW,
+    READY,
+    RUNNING,
+    BLOCKED,
+    TERMINATED
+} so_thread_status;
+
+// Thread structure
+typedef struct
+{
+    // ID
+    tid_t tid;
+    // Running status
+    so_thread_status status;
+
+    // Semaphore to signal when to run and when to sleep
+    sem_t run_sem;
+    // Handler to execute
+    so_handler *handler;
+    // Running time left
+    unsigned int time_left;
+
+    // Priority for scheduling
+    unsigned int priority;
+
+    // Event
+    unsigned int device;
+} so_thread;
+
+// TODO add descr
+typedef struct
+{
+    unsigned int size;
+    so_thread *tasks[Q_CAP];
+} task_queue;
+
+// TODO add descr
+// Scheduler struct
+typedef struct
+{
+    unsigned int events;
+    unsigned int quantum;
+    so_thread *running_th;
+
+    unsigned int num_threads;
+    so_thread *threads[MAX_NUM_THREADS];
+
+    task_queue *tq;
+
+    // Semaphore for ending the scheduler thread-safely
+    sem_t end_sem;
+} so_scheduler;
+
+// TODO add descr
+task_queue *create_task_queue();
+// TODO add descr
+so_thread *peek(task_queue *tq);
+// TODO add descr
+void pop(task_queue *tq);
+// TODO add descr
+void shift_queue_right(task_queue *tq, unsigned int pivot);
+// TODO add descr
+unsigned int get_insert_pos(task_queue *tq, unsigned int trg_priority);
+// TODO add descr
+void enqueue(task_queue *tq, so_thread *t);
+// TODO add descr
+void destroy_scheduler(so_scheduler *s);
+/**
+ * @brief Scheduler update routine. Schedules next thread or sets the current running
+ *
+ * @param s scheduler to update
+ */
+void update_scheduler(so_scheduler *s);
+// TODO add descr
+void init_thread(so_scheduler *s, so_thread *t, void *thread_routine, so_handler *func, unsigned int priority);
+// TODO add descr
+void destroy_thread(so_thread *t);
+// TODO add descr
+void start_thread(so_thread *t, so_scheduler *s, task_queue *tq);
+/**
+ * @brief Routine to execute by every thread
+ *
+ * @param args pointer to a thread struct
+ * @return void* NULL system pthread_exit call
+ */
+void *thread_routine(void *args);
+
 static so_scheduler *s;
 
 // TODO add descr
+task_queue *create_task_queue()
+{
+    task_queue *tq;
+
+    // Alloc memory
+    tq = calloc(1, sizeof(task_queue));
+    DIE(tq == NULL, "calloc create tq");
+
+    // Init fields
+    tq->size = 0;
+
+    return tq;
+}
+
+so_thread *peek(task_queue *tq)
+{
+    unsigned int top_elem_ind;
+
+    // Get top elem ind
+    top_elem_ind = tq->size - 1;
+
+    return tq->tasks[top_elem_ind];
+}
+
+void pop(task_queue *tq)
+{
+    unsigned int top_elem_ind;
+
+    // Get top elem ind
+    top_elem_ind = tq->size - 1;
+    // Pop top elem (mark as NULL)
+    tq->tasks[top_elem_ind] = NULL;
+
+    // Update queue size
+    tq->size--;
+}
+
+void shift_queue_right(task_queue *tq, unsigned int pivot)
+{
+    unsigned int i;
+
+    // Shift elements one by one
+    for (i = tq->size; i > pivot; i--)
+    {
+        tq->tasks[i] = tq->tasks[i - 1];
+    }
+}
+
+unsigned int get_insert_pos(task_queue *tq, unsigned int trg_priority)
+{
+    unsigned int left;
+    unsigned int mid;
+    unsigned int right;
+    unsigned int res;
+
+    so_thread *curr_th;
+    unsigned int curr_priorty;
+
+    // Init boundaries
+    left = 0;
+    right = tq->size;
+
+    while (left <= right)
+    {
+        // Get middle ind
+        mid = (left + right) / 2;
+
+        // Get middle elem
+        curr_th = tq->tasks[mid];
+        curr_priorty = curr_th->priority;
+
+        // Compare elem with target & update boundaries
+        if (curr_priorty < trg_priority)
+        {
+            // Intermediary target found
+            res = mid;
+            left = mid + 1;
+        }
+        else
+        {
+            right = mid - 1;
+        }
+    }
+
+    return res;
+}
+
+void enqueue(task_queue *tq, so_thread *t)
+{
+    unsigned int insert_pos;
+
+    // Get pos to insert new task
+    insert_pos = get_insert_pos(tq, t->priority);
+    // Make space for the new task
+    shift_queue_right(tq, insert_pos);
+
+    // Insert new task
+    tq->tasks[insert_pos] = t;
+    // Update queue size
+    tq->size++;
+}
+
 void destroy_scheduler(so_scheduler *s)
 {
     int ret;
@@ -81,7 +280,6 @@ void so_end(void)
 
 tid_t so_fork(so_handler *func, unsigned int priority)
 {
-    int ret;
     task_queue *tq;
     so_thread *t;
 
@@ -152,7 +350,7 @@ int so_wait(unsigned int io)
     so_thread *t;
 
     // Invalid call check
-    if (io >= s->events || io < 0)
+    if (io >= s->events)
     {
         return -1;
     }
@@ -179,7 +377,7 @@ int so_signal(unsigned int io)
     int resolved_th_cnt;
 
     // Invalid call check
-    if (io >= s->events || io < 0)
+    if (io >= s->events)
     {
         return -1;
     }
@@ -213,11 +411,7 @@ int so_signal(unsigned int io)
     // Return number of awakened threads
     return resolved_th_cnt;
 }
-/**
- * @brief Scheduler update routine. Schedules next thread or sets the current running
- *
- * @param s scheduler to update
- */
+
 void update_scheduler(so_scheduler *s)
 {
     int ret;
@@ -313,18 +507,59 @@ void update_scheduler(so_scheduler *s)
     sem_post(&curr_th->run_sem);
 }
 
-/**
- * @brief Routine to execute by every thread
- *
- * @param args pointer to a thread struct
- * @return void* NULL system pthread_exit call
- */
+void init_thread(so_scheduler *s, so_thread *t, void *thread_routine, so_handler *func, unsigned int priority)
+{
+    int ret;
+
+    // Init fields
+    t->tid = INVALID_TID;
+    t->status = NEW;
+    t->handler = func;
+    t->time_left = s->quantum;
+    t->priority = priority;
+    t->device = SO_MAX_NUM_EVENTS;
+
+    // Init running semaphore as already locked
+    ret = sem_init(&t->run_sem, 0, 0);
+    DIE(ret < 0, "run sem init");
+
+    // Create & start thread
+    ret = pthread_create(&t->tid, NULL, thread_routine, t);
+    DIE(ret < 0, "thread create");
+}
+
+void destroy_thread(so_thread *t)
+{
+    int ret;
+
+    ret = sem_destroy(&t->run_sem);
+    DIE(ret < 0, "run sem destroy");
+
+    free(t);
+}
+
+void start_thread(so_thread *t, so_scheduler *s, task_queue *tq)
+{
+    int ret;
+
+    // Pop task queue
+    pop(tq);
+
+    // Set thread to running
+    t->status = RUNNING;
+    t->time_left = s->quantum;
+
+    // Unlock running semaphore
+    ret = sem_post(&t->run_sem);
+    DIE(ret < 0, "run sem post");
+}
+
 void *thread_routine(void *args)
 {
     int ret;
     so_thread *t;
 
-    t = (so_thread *)t;
+    t = (so_thread *)args;
 
     // Wait for green light from scheduler
     ret = sem_wait(&t->run_sem);
