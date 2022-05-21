@@ -1,15 +1,15 @@
 // Copyright Radu-Stefan Minea 334CA [2022]
 
+#include <stdlib.h>
 #include <stdbool.h>
 #include <pthread.h>
 #include <semaphore.h>
 
 #include "so_scheduler.h"
-#include "utils.h"
 
-#define MAX_NUM_THREADS 500
+// Empirically chosen
+#define MAX_NUM_THREADS 750
 
-// TODO add descr
 // Thread status structure
 typedef enum
 {
@@ -42,40 +42,69 @@ typedef struct
     unsigned int device;
 } so_thread;
 
-// TODO add descr
+// Task queue structure, contains an array of tasks sorted by priority
 typedef struct
 {
+    // Size of queue
     unsigned int size;
+    // Tasks in queue
     so_thread *tasks[MAX_NUM_THREADS];
 } task_queue;
 
-// TODO add descr
 // Scheduler struct
 typedef struct
 {
+    // Whether global struct variable was initialized or not
     bool init;
+    // I/O Events
     unsigned int events;
+    // Default time spent on processor
     unsigned int quantum;
+    // Current thread running on scheduler
     so_thread *running_th;
 
+    // Total number of threads in scheduler
     unsigned int num_threads;
+    // Threads in scheduler
     so_thread *threads[MAX_NUM_THREADS];
 
+    // Task queue
     task_queue tq;
 
     // Semaphore for ending the scheduler thread-safely
     sem_t end_sem;
 } so_scheduler;
 
-// TODO add descr
-so_thread *peek();
-// TODO add descr
-void pop();
-// TODO add descr
+/**
+ * @brief Retrieves top element of task queue
+ * 
+ * @return so_thread* retrieved tassk
+ */
+so_thread *peek(void);
+/**
+ * @brief Removes top element from task queue
+ * 
+ */
+void pop(void);
+/**
+ * @brief Shifts queue one position to the right, beginning
+ * from pivot position
+ * 
+ * @param pivot to begin shifting right from
+ */
 void shift_queue_right(unsigned int pivot);
-// TODO add descr
+/**
+ * @brief Get position to insert task in task queue
+ * 
+ * @param trg_priority of task to be inserted
+ * @return unsigned int position to insert task in task queue 
+ */
 unsigned int get_insert_pos(unsigned int trg_priority);
-// TODO add descr
+/**
+ * @brief Add task to task queue
+ * 
+ * @param t task to be added
+ */
 void push(so_thread *t);
 /**
  * @brief Scheduler update routine. Schedules next thread or sets the current running
@@ -83,11 +112,25 @@ void push(so_thread *t);
  * @param s scheduler to update
  */
 void update_scheduler();
-// TODO add descr
+/**
+ * @brief Create new thread and initialize it
+ * 
+ * @param t thread to be intialized 
+ * @param func routine to be executed by thread
+ * @param priority thread priority
+ */
 void init_thread(so_thread *t, so_handler *func, unsigned int priority);
-// TODO add descr
+/**
+ * @brief Deallocate a thread's resources
+ * 
+ * @param t to be destroyed
+ */
 void destroy_thread(so_thread *t);
-// TODO add descr
+/**
+ * @brief Set a thread to a running state
+ * 
+ * @param t to be ran
+ */
 void start_thread(so_thread *t);
 /**
  * @brief Routine to execute by every thread
@@ -99,7 +142,7 @@ void *thread_routine(void *args);
 
 so_scheduler s;
 
-so_thread *peek()
+so_thread *peek(void)
 {
     task_queue *tq;
     unsigned int top_elem_ind;
@@ -112,7 +155,7 @@ so_thread *peek()
     return tq->tasks[top_elem_ind];
 }
 
-void pop()
+void pop(void)
 {
     task_queue *tq;
     unsigned int top_elem_ind;
@@ -147,48 +190,32 @@ void shift_queue_right(unsigned int pivot)
 unsigned int get_insert_pos(unsigned int trg_priority)
 {
     task_queue *tq;
-
-    int left;
-    int mid;
-    int right;
-    int res;
-
     so_thread *curr_th;
-    unsigned int curr_priorty;
+    unsigned int pos;
 
     // Get task queue
     tq = &(s.tq);
+    // Init pos
+    pos = 0;
 
-    // Init res
-    res = 0;
-
-    // Init boundaries
-    left = 0;
-    right = tq->size - 1;
-
-    while (left <= right)
+    // Iterate through the task queue, from beginning to the end
+    while (pos < tq->size)
     {
-        // Get middle ind
-        mid = (left + right) / 2;
+        curr_th = tq->tasks[pos];
 
-        // Get middle elem
-        curr_th = tq->tasks[mid];
-        curr_priorty = curr_th->priority;
-
-        // Compare elem with target & update boundaries
-        if (curr_priorty < trg_priority)
+        // Increment position
+        if (curr_th->priority < trg_priority)
         {
-            // Intermediary target found
-            res = mid;
-            left = mid + 1;
+            pos++;
         }
+        // Until biggest priority smaller than target priority found
         else
         {
-            right = mid - 1;
+            break;
         }
     }
 
-    return res;
+    return pos;
 }
 
 void push(so_thread *t)
@@ -236,7 +263,10 @@ int so_init(unsigned int time_quantum, unsigned int io)
 
     // Init end semaphore as unlocked
     ret = sem_init(&s.end_sem, 0, 1);
-    DIE(ret < 0, "end sem init");
+    if (ret < 0)
+    {
+        exit(-1);
+    }
 
     return 0;
 }
@@ -254,13 +284,19 @@ void so_end(void)
 
     // Lock the semaphore for thread-safe ending
     ret = sem_wait(&s.end_sem);
-    DIE(ret < 0, "end sem wait");
+    if (ret < 0)
+    {
+        exit(-1);
+    }
 
     // Wait for threads to finish
     for (i = 0; i < s.num_threads; ++i)
     {
         ret = pthread_join(s.threads[i]->tid, NULL);
-        DIE(ret < 0, "thread join");
+        if (ret < 0)
+        {
+            exit(-1);
+        }
     }
 
     // Destroy threads struct
@@ -269,11 +305,13 @@ void so_end(void)
         destroy_thread(s.threads[i]);
     }
 
-    // TODO can be modularized
     // Destroy scheduler
     s.init = false;
     ret = sem_destroy(&s.end_sem);
-    DIE(ret < 0, "end sem destroy");
+    if (ret < 0)
+    {
+        exit(-1);
+    }
 }
 
 tid_t so_fork(so_handler *func, unsigned int priority)
@@ -288,7 +326,10 @@ tid_t so_fork(so_handler *func, unsigned int priority)
 
     // Alloc thread
     t = malloc(sizeof(so_thread));
-    DIE(t == NULL, "t malloc");
+    if (!t)
+    {
+        exit(-1);
+    }
 
     // Init new thread
     init_thread(t, func, priority);
@@ -338,7 +379,10 @@ void so_exec(void)
 
     // Wait for green light from scheduler
     ret = sem_wait(&t->run_sem);
-    DIE(ret < 0, "sem_wait");
+    if (ret < 0)
+    {
+        exit(-1);
+    }
 }
 
 int so_wait(unsigned int io)
@@ -436,7 +480,10 @@ void update_scheduler()
         {
             // Trigger scheduler stop
             ret = sem_post(&s.end_sem);
-            DIE(ret < 0, "end sem post");
+            if (ret < 0)
+            {
+                exit(-1);
+            }
         }
 
         // Set current thread to run (last thread to be ran)
@@ -494,7 +541,6 @@ void update_scheduler()
         // No one better suited to run next than curr_th -> reset curr_th time
         else
         {
-            //! replaceble with s->running_th->time_left = s->quantum
             curr_th->time_left = s.quantum;
         }
     }
@@ -517,20 +563,31 @@ void init_thread(so_thread *t, so_handler *func, unsigned int priority)
 
     // Init running semaphore as already locked
     ret = sem_init(&t->run_sem, 0, 0);
-    DIE(ret < 0, "run sem init");
+    if (ret < 0)
+    {
+        exit(-1);
+    }
 
     // Create & start thread
     ret = pthread_create(&t->tid, NULL, &thread_routine, t);
-    DIE(ret < 0, "thread create");
+    if (ret < 0)
+    {
+        exit(-1);
+    }
 }
 
 void destroy_thread(so_thread *t)
 {
     int ret;
 
+    // Deallocate semaphore
     ret = sem_destroy(&t->run_sem);
-    DIE(ret < 0, "run sem destroy");
+    if (ret < 0)
+    {
+        exit(-1);
+    }
 
+    // Deallocate thread
     free(t);
 }
 
@@ -538,7 +595,7 @@ void start_thread(so_thread *t)
 {
     int ret;
 
-    // Pop task queue
+    // Pop task from waiting list
     pop();
 
     // Set thread to running
@@ -547,7 +604,10 @@ void start_thread(so_thread *t)
 
     // Unlock running semaphore
     ret = sem_post(&t->run_sem);
-    DIE(ret < 0, "run sem post");
+    if (ret < 0)
+    {
+        exit(-1);
+    }
 }
 
 void *thread_routine(void *args)
@@ -559,7 +619,10 @@ void *thread_routine(void *args)
 
     // Wait for green light from scheduler
     ret = sem_wait(&t->run_sem);
-    DIE(ret < 0, "run sem wait");
+    if (ret < 0)
+    {
+        exit(-1);
+    }
 
     // Run handler
     t->handler(t->priority);

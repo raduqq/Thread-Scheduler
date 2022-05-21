@@ -1,0 +1,70 @@
+# SO - Tema 4 - Planificator de Thread-uri
+
+Nume: Radu-Stefan Minea
+Serie: CA
+Grupa: 334CA
+Timp de lucru: 5 zile
+
+===============================================================================
+## Descrierea proiectului
+
+Implementarea unui scheduler minimal de thread-uri, functionand pe un singur
+procesor
+
+===============================================================================
+## Descrierea solutiei
+
+* Scheduler
+  - Alegerea thread-urilor care sa ruleze pe procesor este realizata
+    printr-un Priority Queue minimal, denumit simplu Task Queue
+  - Pentru a declansa momentul de inchidere a scheduler-ului, folosim un semafor
+  - La fiecare operatie/unitate de timp a procesorului, se apeleaza
+    update_scheduler, pentru a mentine timpii de executie ai Task-urilor
+    up-to-date si pentru a pastra constant in executie Thread-ul cu cea mai mare
+    prioritate
+
+* Task Queue
+  - Se bazeaza pe un vector de Task-uri sortate crescator dupa prioritatea task-ului
+  - Task-ul ce urmeaza sa fie executat (cel cu cea mai mare prioritate) va fi
+    extras de la capatul cozii
+  - Un Task ce este preemptat este adaugat in Queue, daca s-a terminat deja ori
+    daca nu este blocat
+
+* Thread
+    - Fiecare Thread are asociat un semafor, folosit pentru a marca daca
+    thread-ul poate rula sau nu
+
+* Fork
+    - Se creeaza, porneste si adauga in Queue un nou Thread
+    - Thread-ul asteapta de la semafor permisiunea de a rula, adica de a apela
+    handler-ul asociat
+
+* Exec
+    - Se simuleaza trecerea unei unitati de timp, Thread-ul asteptand la semafor
+
+* Wait
+    - Se blocheaza Thread-ul curent printr-un eveniment
+
+* Signal
+    - Se trezesc toate thread-urile ce asteapta evenimentul dat
+    - Thread-urile afectate de eveniment sunt trecute in READY si introduse in
+    Queue
+
+
+===============================================================================
+## Limitari
+
+* Incercasem sa eficientizez inserarea in Queue, intrucat momentan solutia
+prezinta o implementare bruta, de O(N)
+  - Concret, incercasem inlocuirea parcurgerii liniare a Queue-ului 
+    printr-o cautare binara (O(logN)), insa intampinam Segmentation Fault-uri
+    pe care nu am reusit sa le tratez
+
+===============================================================================
+## Feedback
+
+* Usor dificila, dar interesanta!
+ 
+* Intrucat nu am reusit sa ma apuc de ea decat in apropierea deadline-ului 
+soft, faceam constant o analogie intre tema si propria viata, eu incercand sa
+strecor o multitudine de task-uri pe cuante foarte restranse ca si timp

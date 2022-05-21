@@ -9,7 +9,7 @@ build: libscheduler.so
 libscheduler.so: so_scheduler.o
 	$(CC) $(LDFLAGS) -shared -o $@ $^
 
-so_scheduler.o: so_scheduler.c so_scheduler.h utils.h
+so_scheduler.o: so_scheduler.c so_scheduler.h
 	$(CC) $(CFLAGS) -o $@ -c $<
 
 .PHONY: clean
