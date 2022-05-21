@@ -3,8 +3,7 @@
 
 #include "utils.h"
 
-// TODO: modify
-#define Q_CAP 1000
+#define Q_CAP 500
 
 typedef struct
 {
@@ -14,6 +13,8 @@ typedef struct
 
 // TODO add descr
 task_queue *create_task_queue();
+// TODO add descr
+so_thread *peek(task_queue *tq);
 // TODO add descr
 void pop(task_queue *tq);
 // TODO add descr

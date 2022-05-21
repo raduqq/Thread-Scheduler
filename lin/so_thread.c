@@ -1,13 +1,13 @@
 #include "so_thread.h"
 
-void init_thread(so_scheduler *s, so_thread *t, so_handler *f, unsigned int priority)
+void init_thread(so_scheduler *s, so_thread *t, void *thread_routine, so_handler *func, unsigned int priority)
 {
     int ret;
 
     // Init fields
     t->tid = INVALID_TID;
     t->status = NEW;
-    t->handler = f;
+    t->handler = func;
     t->time_left = s->quantum;
     t->priority = priority;
     t->device = SO_MAX_NUM_EVENTS;
@@ -15,6 +15,10 @@ void init_thread(so_scheduler *s, so_thread *t, so_handler *f, unsigned int prio
     // Init running semaphore as already locked
     ret = sem_init(&t->run_sem, 0, 0);
     DIE(ret < 0, "run sem init");
+
+    // Create & start thread
+    ret = pthread_create(&t->tid, NULL, &thread_routine, t);
+    DIE(ret < 0, "thread create");
 }
 
 void destroy_thread(so_thread *t)
@@ -41,9 +45,4 @@ void start_thread(so_thread *t, so_scheduler *s, task_queue *tq)
     // Unlock running semaphore
     ret = sem_post(&t->run_sem);
     DIE(ret < 0, "run sem post");
-}
-
-// TODO
-void *thread_routine(void *args) {
-
 }

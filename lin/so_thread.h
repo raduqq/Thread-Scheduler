@@ -3,8 +3,7 @@
 
 #include "utils.h"
 
-// TODO modify
-#define MAX_NUM_THREADS 1000
+#define MAX_NUM_THREADS 500
 
 // Thread status structure
 typedef enum
@@ -17,7 +16,8 @@ typedef enum
 } so_thread_status;
 
 // Thread structure
-typedef struct {
+typedef struct
+{
     // ID
     tid_t tid;
     // Running status
@@ -38,12 +38,10 @@ typedef struct {
 } so_thread;
 
 // TODO: add descr
-void init_thread(so_scheduler *s, so_thread *t, so_handler *f, unsigned int priority);
+void init_thread(so_scheduler *s, so_thread *t, void *thread_routine, so_handler *func, unsigned int priority);
 // TODO: add descr
 void destroy_thread(so_thread *t);
 // TODO: add descr
 void start_thread(so_thread *t, so_scheduler *s, task_queue *tq);
-// TODO: add descr
-void *thread_routine(void *args);
 
 #endif

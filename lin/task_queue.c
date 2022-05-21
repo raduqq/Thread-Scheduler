@@ -14,9 +14,18 @@ task_queue *create_task_queue()
     return tq;
 }
 
+so_thread* peek(task_queue *tq) {
+    unsigned int top_elem_ind;
+
+    // Get top elem ind
+    top_elem_ind = tq->size - 1;
+
+    return tq->tasks[top_elem_ind];
+}
+
 void pop(task_queue *tq)
 {
-    int top_elem_ind;
+    unsigned int top_elem_ind;
 
     // Get top elem ind
     top_elem_ind = tq->size - 1;
@@ -29,7 +38,7 @@ void pop(task_queue *tq)
 
 void shift_queue_right(task_queue *tq, unsigned int pivot)
 {
-    int i;
+    unsigned int i;
 
     // Shift elements one by one
     for (i = tq->size; i > pivot; i--)
@@ -77,7 +86,6 @@ unsigned int get_insert_pos(task_queue *tq, unsigned int trg_priority)
     return res;
 }
 
-// TODO: nu uita sa dai s.queue[i]->status = READY inainte de enqueue
 void enqueue(task_queue *tq, so_thread *t)
 {
     unsigned int insert_pos;
