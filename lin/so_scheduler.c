@@ -84,7 +84,7 @@ void enqueue(so_thread *t);
  */
 void update_scheduler();
 // TODO add descr
-void init_thread(so_thread *t, void *thread_routine, so_handler *func, unsigned int priority);
+void init_thread(so_thread *t, so_handler *func, unsigned int priority);
 // TODO add descr
 void destroy_thread(so_thread *t);
 // TODO add descr
@@ -287,12 +287,13 @@ tid_t so_fork(so_handler *func, unsigned int priority)
     DIE(t == NULL, "t malloc");
 
     // Init new thread
-    init_thread(t, thread_routine, func, priority);
+    init_thread(t, func, priority);
 
     // Update scheduler thread list
     s.threads[s.num_threads] = t;
     // Update scheduler thread count
     s.num_threads++;
+    
     // Update thread status to ready
     t->status = READY;
     // Schedule new thread
@@ -498,7 +499,7 @@ void update_scheduler()
     sem_post(&curr_th->run_sem);
 }
 
-void init_thread(so_thread *t, void *thread_routine, so_handler *func, unsigned int priority)
+void init_thread(so_thread *t, so_handler *func, unsigned int priority)
 {
     int ret;
 
@@ -515,7 +516,7 @@ void init_thread(so_thread *t, void *thread_routine, so_handler *func, unsigned 
     DIE(ret < 0, "run sem init");
 
     // Create & start thread
-    ret = pthread_create(&t->tid, NULL, thread_routine, t);
+    ret = pthread_create(&t->tid, NULL, &thread_routine, t);
     DIE(ret < 0, "thread create");
 }
 
