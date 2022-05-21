@@ -99,9 +99,6 @@ void *thread_routine(void *args);
 
 so_scheduler s;
 
-pthread_mutex_t pop_mutex;
-pthread_mutex_t push_mutex;
-
 so_thread *peek()
 {
     task_queue *tq;
@@ -117,9 +114,6 @@ so_thread *peek()
 
 void pop()
 {
-    // Lock mutex
-    pthread_mutex_lock(&pop_mutex);
-
     task_queue *tq;
     unsigned int top_elem_ind;
 
@@ -133,9 +127,6 @@ void pop()
 
     // Update queue size
     tq->size--;
-
-    // Unlock mutex
-    pthread_mutex_unlock(&pop_mutex);
 }
 
 void shift_queue_right(unsigned int pivot)
@@ -157,10 +148,10 @@ unsigned int get_insert_pos(unsigned int trg_priority)
 {
     task_queue *tq;
 
-    unsigned int left;
-    unsigned int mid;
-    unsigned int right;
-    unsigned int res;
+    int left;
+    int mid;
+    int right;
+    int res;
 
     so_thread *curr_th;
     unsigned int curr_priorty;
@@ -168,15 +159,12 @@ unsigned int get_insert_pos(unsigned int trg_priority)
     // Get task queue
     tq = &(s.tq);
 
-    // Empty queue -> insert straight away
-    if (tq->size == 0)
-    {
-        return 0;
-    }
+    // Init res
+    res = 0;
 
     // Init boundaries
     left = 0;
-    right = tq->size;
+    right = tq->size - 1;
 
     while (left <= right)
     {
@@ -205,9 +193,6 @@ unsigned int get_insert_pos(unsigned int trg_priority)
 
 void push(so_thread *t)
 {
-    // Lock mutex
-    pthread_mutex_lock(&push_mutex);
-
     task_queue *tq;
 
     unsigned int insert_pos;
@@ -224,9 +209,6 @@ void push(so_thread *t)
     tq->tasks[insert_pos] = t;
     // Update queue size
     tq->size++;
-
-    // Unlock mutex
-    pthread_mutex_unlock(&push_mutex);
 }
 
 int so_init(unsigned int time_quantum, unsigned int io)
@@ -255,10 +237,6 @@ int so_init(unsigned int time_quantum, unsigned int io)
     // Init end semaphore as unlocked
     ret = sem_init(&s.end_sem, 0, 1);
     DIE(ret < 0, "end sem init");
-
-    // Init mutex
-    pthread_mutex_init(&push_mutex, NULL);
-    pthread_mutex_init(&pop_mutex, NULL);
 
     return 0;
 }
@@ -296,10 +274,6 @@ void so_end(void)
     s.init = false;
     ret = sem_destroy(&s.end_sem);
     DIE(ret < 0, "end sem destroy");
-
-    // Destroy mutex
-    pthread_mutex_destroy(&push_mutex);
-    pthread_mutex_destroy(&pop_mutex);
 }
 
 tid_t so_fork(so_handler *func, unsigned int priority)
