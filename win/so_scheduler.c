@@ -1,9 +1,7 @@
 // Copyright Radu-Stefan Minea 334CA [2022]
 
+#include <windows.h>
 #include <stdlib.h>
-#include <stdbool.h>
-#include <pthread.h>
-#include <semaphore.h>
 
 #include "so_scheduler.h"
 
@@ -29,7 +27,7 @@ typedef struct
     so_thread_status status;
 
     // Semaphore to signal when to run and when to sleep
-    sem_t run_sem;
+    HANDLE run_sem;
     // Handler to execute
     so_handler *handler;
     // Running time left
@@ -55,7 +53,7 @@ typedef struct
 typedef struct
 {
     // Whether global struct variable was initialized or not
-    bool init;
+    BOOL init;
     // I/O Events
     unsigned int events;
     // Default time spent on processor
@@ -72,37 +70,37 @@ typedef struct
     task_queue tq;
 
     // Semaphore for ending the scheduler thread-safely
-    sem_t end_sem;
+    HANDLE end_sem;
 } so_scheduler;
 
 /**
  * @brief Retrieves top element of task queue
- * 
+ *
  * @return so_thread* retrieved tassk
  */
 so_thread *peek(void);
 /**
  * @brief Removes top element from task queue
- * 
+ *
  */
 void pop(void);
 /**
  * @brief Shifts queue one position to the right, beginning
  * from pivot position
- * 
+ *
  * @param pivot to begin shifting right from
  */
 void shift_queue_right(unsigned int pivot);
 /**
  * @brief Get position to insert task in task queue
- * 
+ *
  * @param trg_priority of task to be inserted
- * @return unsigned int position to insert task in task queue 
+ * @return unsigned int position to insert task in task queue
  */
 unsigned int get_insert_pos(unsigned int trg_priority);
 /**
  * @brief Add task to task queue
- * 
+ *
  * @param t task to be added
  */
 void push(so_thread *t);
@@ -114,21 +112,21 @@ void push(so_thread *t);
 void update_scheduler();
 /**
  * @brief Create new thread and initialize it
- * 
- * @param t thread to be intialized 
+ *
+ * @param t thread to be intialized
  * @param func routine to be executed by thread
  * @param priority thread priority
  */
 void init_thread(so_thread *t, so_handler *func, unsigned int priority);
 /**
  * @brief Deallocate a thread's resources
- * 
+ *
  * @param t to be destroyed
  */
 void destroy_thread(so_thread *t);
 /**
  * @brief Set a thread to a running state
- * 
+ *
  * @param t to be ran
  */
 void start_thread(so_thread *t);
@@ -138,9 +136,9 @@ void start_thread(so_thread *t);
  * @param args pointer to a thread struct
  * @return void* NULL system pthread_exit call
  */
-void *thread_routine(void *args);
+DWORD WINAPI ThreadFunc(LPVOID lpParameter);
 
-so_scheduler s; 
+so_scheduler s;
 
 so_thread *peek(void)
 {
@@ -241,7 +239,6 @@ void push(so_thread *t)
 int so_init(unsigned int time_quantum, unsigned int io)
 {
     task_queue *tq;
-    int ret;
 
     // Invalid call check
     if (s.init || time_quantum == 0 || io > SO_MAX_NUM_EVENTS)
@@ -250,7 +247,7 @@ int so_init(unsigned int time_quantum, unsigned int io)
     }
 
     // Init fields
-    s.init = true;
+    s.init = TRUE;
     s.events = io;
     s.quantum = time_quantum;
     s.num_threads = 0;
@@ -262,8 +259,8 @@ int so_init(unsigned int time_quantum, unsigned int io)
     tq->size = 0;
 
     // Init end semaphore as unlocked
-    ret = sem_init(&s.end_sem, 0, 1);
-    if (ret < 0)
+    s.end_sem = CreateSemaphore(NULL, 1, 1, "end sem");
+    if (s.end_sem == NULL)
     {
         exit(-1);
     }
@@ -273,7 +270,8 @@ int so_init(unsigned int time_quantum, unsigned int io)
 
 void so_end(void)
 {
-    int ret;
+    BOOL bReturn;
+    DWORD dwReturn;
     unsigned int i;
 
     // Invalid call check
@@ -283,8 +281,8 @@ void so_end(void)
     }
 
     // Lock the semaphore for thread-safe ending
-    ret = sem_wait(&s.end_sem);
-    if (ret < 0)
+    dwReturn = WaitForSingleObject(s.end_sem, INFINITE);
+    if (dwReturn == WAIT_FAILED)
     {
         exit(-1);
     }
@@ -292,8 +290,8 @@ void so_end(void)
     // Wait for threads to finish
     for (i = 0; i < s.num_threads; ++i)
     {
-        ret = pthread_join(s.threads[i]->tid, NULL);
-        if (ret < 0)
+        dwReturn = WaitForSingleObject(s.threads[i], INFINITE);
+        if (dwReturn == WAIT_FAILED)
         {
             exit(-1);
         }
@@ -306,9 +304,9 @@ void so_end(void)
     }
 
     // Destroy scheduler
-    s.init = false;
-    ret = sem_destroy(&s.end_sem);
-    if (ret < 0)
+    s.init = FALSE;
+    bReturn = CloseHandle(s.end_sem);
+    if (!bReturn)
     {
         exit(-1);
     }
@@ -363,7 +361,7 @@ tid_t so_fork(so_handler *func, unsigned int priority)
 
 void so_exec(void)
 {
-    int ret;
+    DWORD dwReturn;
     so_thread *t;
 
     unsigned int new_time_left;
@@ -378,8 +376,8 @@ void so_exec(void)
     update_scheduler();
 
     // Wait for green light from scheduler
-    ret = sem_wait(&t->run_sem);
-    if (ret < 0)
+    dwReturn = WaitForSingleObject(t->run_sem, INFINITE);
+    if (dwReturn == WAIT_FAILED)
     {
         exit(-1);
     }
@@ -451,7 +449,7 @@ int so_signal(unsigned int io)
 
 void update_scheduler()
 {
-    int ret;
+    BOOL bReturn;
 
     task_queue *tq;
 
@@ -459,13 +457,13 @@ void update_scheduler()
     so_thread *next_th;
 
     // True if no thread is running; else false
-    bool is_no_th_running;
+    BOOL is_no_th_running;
     // True if current thread is blocked or terminated; else false
-    bool is_th_blocked_or_done;
+    BOOL is_th_blocked_or_done;
     // True if next thread has higher priority than current thread; else false
-    bool is_higher_prio_avail;
+    BOOL is_higher_prio_avail;
     // True if current thread has no time left on processor
-    bool has_th_time_expired;
+    BOOL has_th_time_expired;
 
     // Get current running thread
     curr_th = s.running_th;
@@ -479,15 +477,19 @@ void update_scheduler()
         if (curr_th->status == TERMINATED)
         {
             // Trigger scheduler stop
-            ret = sem_post(&s.end_sem);
-            if (ret < 0)
+            bReturn = ReleaseSemaphore(s.end_sem, 1, NULL);
+            if (!bReturn)
             {
                 exit(-1);
             }
         }
 
         // Set current thread to run (last thread to be ran)
-        sem_post(&curr_th->run_sem);
+        bReturn = ReleaseSemaphore(curr_th->run_sem, 1, NULL);
+        if (!bReturn)
+        {
+            exit(-1);
+        }
 
         // Update done
         return;
@@ -498,9 +500,9 @@ void update_scheduler()
 
     // Set scheduler state variables
     is_no_th_running = (s.running_th == NULL);
-    is_th_blocked_or_done = curr_th ? (curr_th->status == BLOCKED || curr_th->status == TERMINATED) : false;
-    is_higher_prio_avail = curr_th ? (curr_th->priority < next_th->priority) : false;
-    has_th_time_expired = curr_th ? (curr_th->time_left <= 0) : false;
+    is_th_blocked_or_done = curr_th ? (curr_th->status == BLOCKED || curr_th->status == TERMINATED) : FALSE;
+    is_higher_prio_avail = curr_th ? (curr_th->priority < next_th->priority) : FALSE;
+    has_th_time_expired = curr_th ? (curr_th->time_left <= 0) : FALSE;
 
     // If we need to set a different thread running than the current one
     if (is_no_th_running || is_th_blocked_or_done || is_higher_prio_avail)
@@ -546,12 +548,16 @@ void update_scheduler()
     }
 
     // Current thread has no need to be preempted -> set it running
-    sem_post(&curr_th->run_sem);
+    bReturn = ReleaseSemaphore(curr_th->run_sem, 1, NULL);
+    if (!bReturn)
+    {
+        exit(-1);
+    }
 }
 
 void init_thread(so_thread *t, so_handler *func, unsigned int priority)
 {
-    int ret;
+    HANDLE hthread;
 
     // Init fields
     t->tid = INVALID_TID;
@@ -562,15 +568,15 @@ void init_thread(so_thread *t, so_handler *func, unsigned int priority)
     t->device = SO_MAX_NUM_EVENTS;
 
     // Init running semaphore as already locked
-    ret = sem_init(&t->run_sem, 0, 0);
-    if (ret < 0)
+    t->run_sem = CreateSemaphore(NULL, 0, 1, "run_sem");
+    if (t->run_sem == NULL)
     {
         exit(-1);
     }
 
     // Create & start thread
-    ret = pthread_create(&t->tid, NULL, &thread_routine, t);
-    if (ret < 0)
+    hthread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)ThreadFunc, (LPVOID)t, 0, &t->tid);
+    if (!hthread)
     {
         exit(-1);
     }
@@ -578,11 +584,11 @@ void init_thread(so_thread *t, so_handler *func, unsigned int priority)
 
 void destroy_thread(so_thread *t)
 {
-    int ret;
+    BOOL bReturn;
 
     // Deallocate semaphore
-    ret = sem_destroy(&t->run_sem);
-    if (ret < 0)
+    bReturn = CloseHandle(t->run_sem);
+    if (!bReturn)
     {
         exit(-1);
     }
@@ -593,7 +599,7 @@ void destroy_thread(so_thread *t)
 
 void start_thread(so_thread *t)
 {
-    int ret;
+    BOOL bReturn;
 
     // Pop task from waiting list
     pop();
@@ -603,33 +609,35 @@ void start_thread(so_thread *t)
     t->time_left = s.quantum;
 
     // Unlock running semaphore
-    ret = sem_post(&t->run_sem);
-    if (ret < 0)
+    bReturn = ReleaseSemaphore(t->run_sem, 1, NULL);
+    if (!bReturn)
     {
         exit(-1);
     }
 }
 
-void *thread_routine(void *args)
+DWORD WINAPI ThreadFunc(LPVOID lpParameter)
 {
-    int ret;
+    DWORD dwReturn;
     so_thread *t;
+    so_handler *thread_func;
 
-    t = (so_thread *)args;
+    t = (so_thread *)lpParameter;
+    thread_func = t->handler;
 
     // Wait for green light from scheduler
-    ret = sem_wait(&t->run_sem);
-    if (ret < 0)
+    dwReturn = WaitForSingleObject(t->run_sem, INFINITE);
+    if (dwReturn == WAIT_FAILED)
     {
         exit(-1);
     }
 
     // Run handler
-    t->handler(t->priority);
+    thread_func(t->priority);
 
     // Running done -> update status & scheduler
     t->status = TERMINATED;
     update_scheduler();
 
-    pthread_exit(NULL);
+    return 0;
 }
